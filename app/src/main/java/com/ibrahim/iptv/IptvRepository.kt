@@ -54,7 +54,7 @@ class IptvRepository(context: Context) {
             val o = live.optJSONObject(i) ?: continue
             val id = o.optString("stream_id")
             if (id.isNotBlank()) result += TvEntry(id, o.optString("name", "Live channel"),
-                o.optString("stream_icon"), "$server/live/${enc(username)}/${enc(password)}/$id.m3u8",
+                o.optString("stream_icon"), "$server/live/${enc(username)}/${enc(password)}/$id.ts",
                 o.optString("category_name"), "live")
         }
         val vod = getArray("$server/player_api.php?$credentials&action=get_vod_streams")

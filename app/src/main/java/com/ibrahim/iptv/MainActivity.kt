@@ -79,6 +79,7 @@ private fun IbrahimApp(repo: IptvRepository) {
     var selected by remember { mutableStateOf<TvEntry?>(null) }
     var entries by remember { mutableStateOf(emptyList<TvEntry>()) }
     var search by remember { mutableStateOf("") }
+    val appScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         val saved = repo.readCredentials()
@@ -109,14 +110,15 @@ private fun IbrahimApp(repo: IptvRepository) {
                             password, { password = it }, busy, message,
                             onConnect = {
                                 busy = true; message = ""
-                                (repo).let { repository ->
-                                    // Provider validation and catalog load run off the UI thread.
-                                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                                        runCatching { repository.connect(server, username, password) }
-                                            .onSuccess { entries = it; connected = true; message = "Provider connected successfully." }
-                                            .onFailure { message = it.message ?: "Connection failed." }
-                                        busy = false
-                                    }
+                                appScope.launch {
+                                    runCatching { repo.connect(server, username, password) }
+                                        .onSuccess {
+                                            entries = it
+                                            connected = true
+                                            message = "Provider connected successfully."
+                                        }
+                                        .onFailure { message = it.message ?: "Connection failed." }
+                                    busy = false
                                 }
                             },
                             onDisconnect = { repo.clearCredentials(); connected = false; entries = emptyList(); message = "Provider disconnected." }
@@ -124,12 +126,31 @@ private fun IbrahimApp(repo: IptvRepository) {
                         "search" -> {
                             SearchScreen(search, { search = it }, entries.filter { it.title.contains(search, true) }, { selected = it })
                         }
+                        "live", "movies", "series" -> {
+                            val type = when (page) {
+                                "live" -> "live"
+                                "movies" -> "vod"
+                                else -> "series"
+                            }
+                            CatalogScreen(
+                                title = when (page) {
+                                    "live" -> "IPTV"
+                                    "movies" -> "MOVIES"
+                                    else -> "TV SHOWS"
+                                },
+                                entries = entries.filter { it.type == type },
+                                connected = connected,
+                                busy = busy,
+                                onConnect = { page = "settings" },
+                                onPlay = { if (it.streamUrl.isNotBlank()) selected = it }
+                            )
+                        }
                         else -> HomeScreen(
                             entries = entries,
                             connected = connected,
                             busy = busy,
                             onConnect = { page = "settings" },
-                            onPlay = { selected = it },
+                            onPlay = { if (it.streamUrl.isNotBlank()) selected = it },
                             onBrowse = { page = it }
                         )
                     }
@@ -146,9 +167,9 @@ private fun IbrahimApp(repo: IptvRepository) {
 private fun SideRail(page: String, onSelect: (String) -> Unit) {
     val items = listOf(
         Triple("home", Icons.Default.Home, "Home"),
-        Triple("live", Icons.Default.LiveTv, "Live TV"),
-        Triple("movies", Icons.Default.Movie, "Movies"),
-        Triple("series", Icons.Default.Tv, "Series"),
+        Triple("live", Icons.Default.LiveTv, "IPTV"),
+        Triple("movies", Icons.Default.Movie, "MOVIES"),
+        Triple("series", Icons.Default.Tv, "TV SHOWS"),
         Triple("search", Icons.Default.Search, "Search"),
         Triple("settings", Icons.Default.Settings, "Settings")
     )
@@ -227,6 +248,43 @@ private fun HomeScreen(
             item { ContentRail("Live channels", live.take(16), onPlay) }
             item { ContentRail("Movies", movies.take(16), onPlay) }
             item { ContentRail("Series", series.take(16), onPlay) }
+        }
+    }
+}
+
+@Composable
+private fun CatalogScreen(
+    title: String,
+    entries: List<TvEntry>,
+    connected: Boolean,
+    busy: Boolean,
+    onConnect: () -> Unit,
+    onPlay: (TvEntry) -> Unit
+) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 24.dp)
+    ) {
+        Text(title, fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+        Spacer(Modifier.height(18.dp))
+        when {
+            busy -> Text("Loading your library…", color = Muted)
+            !connected -> EmptyState(
+                "Connect your provider",
+                "Add your Xtream Server, username and password in Settings.",
+                onConnect
+            )
+            entries.isEmpty() -> EmptyState(
+                "Nothing here yet",
+                "No items were returned in this section by your provider.",
+                onConnect
+            )
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(entries) { entry -> PosterCard(entry, onPlay) }
+                    }
+                }
+            }
         }
     }
 }
@@ -343,7 +401,7 @@ private fun SettingsScreen(
     Column(Modifier.fillMaxSize().padding(38.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Text("IPTV provider · Xtream Codes", color = Muted)
-        TvInput("Server URL", server, onServer)
+        TvInput("XTREAM SERVER", server, onServer)
         TvInput("Username", username, onUsername)
         TvInput("Password", password, onPassword, secret = true)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
